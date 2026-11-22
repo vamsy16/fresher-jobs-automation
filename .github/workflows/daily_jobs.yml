@@ -1,0 +1,38 @@
+name: Scrape Google Fresher Jobs to PDF
+
+on:
+  workflow_dispatch: # Lets you trigger it manually with a button click
+  schedule:
+    - cron: '30 3 * * *' # Runs automatically every day at 9:00 AM IST
+
+permissions:
+  contents: write # Gives GitHub permission to save the PDF into your repo
+
+jobs:
+  scrape-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python packages & Browser
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Run Google Scraper
+        run: python scrape_google.py
+
+      - name: Save PDF to GitHub
+        run: |
+          git config --global user.name "GitHub Bot"
+          git config --global user.email "bot@github.com"
+          git add *.pdf
+          git commit -m "Add fresher job links for $(date +'%Y-%m-%d')" || exit 0
+          git push
