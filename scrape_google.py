@@ -4,25 +4,26 @@ import urllib.parse
 from fpdf import FPDF
 from playwright.sync_api import sync_playwright
 
+# Broader domain queries so search engines catch every new job URL
 QUERIES = [
-    'site:://linkedin.com "fresher" OR "0-1 years"',
-    'site:://naukri.com "fresher"',
-    'site:://internshala.com "fresher"',
-    'site:foundit.in/job "fresher"',
+    'site:://linkedin.com "fresher"',
+    'site:naukri.com "fresher" jobs',
+    'site:internshala.com "fresher" job',
+    'site:foundit.in "fresher" job',
 ]
 
 
 def clean_and_add(href, extracted_links):
   if not href:
     return
-  # Unwrap DuckDuckGo redirects
+  # Fix: extract [0] string from parse_qs list
   if "uddg=" in href:
     parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
-    href = parsed.get("uddg", [""])
-  # Unwrap Yahoo redirects (RU=...)
+    urls = parsed.get("uddg", [])
+    href = urls[0] if urls else ""
   elif "/RU=" in href:
     try:
-      encoded_part = href.split("/RU=").split("/RK=")
+      encoded_part = href.split("/RU=")[1].split("/RK=")[0]
       href = urllib.parse.unquote(encoded_part)
     except Exception:
       pass
@@ -54,10 +55,10 @@ def fetch_all_engines(queries):
         ddg_url = "https://duckduckgo.com" + "/html/?" + ddg_params
         page.goto(ddg_url, wait_until="domcontentloaded", timeout=15000)
         time.sleep(2)
-        for link in page.locator("a.result__url").all():
+        for link in page.locator("a.result__a").all():
           clean_and_add(link.get_attribute("href"), extracted_links)
       except Exception as e:
-        print(f"DuckDuckGo skipped for '{query}': {e}")
+        print(f"DuckDuckGo skipped: {e}")
 
       # 2. Bing (filters=ex1:"ez1" -> Past 24 hours)
       try:
@@ -70,7 +71,7 @@ def fetch_all_engines(queries):
         for link in page.locator("li.b_algo h2 a").all():
           clean_and_add(link.get_attribute("href"), extracted_links)
       except Exception as e:
-        print(f"Bing skipped for '{query}': {e}")
+        print(f"Bing skipped: {e}")
 
       # 3. Yahoo Search (btf=d -> Past 24 hours)
       try:
@@ -78,10 +79,10 @@ def fetch_all_engines(queries):
         yahoo_url = "https://yahoo.com" + "/search?" + yahoo_params
         page.goto(yahoo_url, wait_until="domcontentloaded", timeout=15000)
         time.sleep(2)
-        for link in page.locator("div#web ol li h3 a").all():
+        for link in page.locator("div#web ol li a").all():
           clean_and_add(link.get_attribute("href"), extracted_links)
       except Exception as e:
-        print(f"Yahoo skipped for '{query}': {e}")
+        print(f"Yahoo skipped: {e}")
 
     browser.close()
   return sorted(list(extracted_links))
