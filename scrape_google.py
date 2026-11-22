@@ -5,21 +5,26 @@ import urllib.parse
 from fpdf import FPDF
 from playwright.sync_api import sync_playwright
 
-# Google Search queries (filtered to past 24 hours via tbs=qdr:d)
 QUERIES = [
     'site:://linkedin.com "fresher" OR "0-1 years"',
-    'site:://naukri.com "fresher"',
-    'site:://internshala.com "fresher"',
-    'site:foundit.in/job "fresher"',
+    'site:naukri.com "fresher" jobs',
+    'site:internshala.com "fresher" job',
+    'site:foundit.in "fresher" job',
 ]
+
+TARGET_DOMAINS = ["linkedin.com", "naukri.com", "internshala.com", "foundit.in"]
 
 
 def fetch_google_links(queries):
   extracted_links = set()
 
   with sync_playwright() as p:
-    # Visible Chrome window prevents Google CAPTCHAs on your home/mobile internet
-    browser = p.chromium.launch(headless=False)
+    # Uses your real Chrome browser with automation flag hidden
+    browser = p.chromium.launch(
+        channel="chrome",
+        headless=False,
+        args=["--disable-blink-features=AutomationControlled"],
+    )
     context = browser.new_context()
     page = context.new_page()
 
@@ -28,16 +33,28 @@ def fetch_google_links(queries):
       url = "https://google.com" + "/search?" + params
 
       page.goto(url, wait_until="domcontentloaded")
-      time.sleep(5)
+      time.sleep(4)
 
-      links = page.locator("div#search a").all()
-      for link in links:
+      # If Google shows a CAPTCHA/sorry page, give you 20 seconds to solve it
+      if "sorry/index" in page.url or page.locator("iframe[src*='recaptcha']").count() > 0:
+        print("CAPTCHA detected! Please solve it in the browser window...")
+        time.sleep(20)
+
+      # Extract all external links matching our job portals
+      for link in page.locator("a").all():
         href = link.get_attribute("href")
+        if not href:
+          continue
+        # Handle Google /url?q=... redirect links if present
+        if href.startswith("/url?"):
+          parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
+          q_urls = parsed.get("q", [])
+          href = q_urls if q_urls else ""
+
         if (
-            href
-            and href.startswith("http")
+            href.startswith("http")
             and "google.com" not in href
-            and "webcache" not in href
+            and any(domain in href for domain in TARGET_DOMAINS)
         ):
           extracted_links.add(href)
 
