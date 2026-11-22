@@ -12,7 +12,29 @@ QUERIES = [
 ]
 
 
-def fetch_google_links(queries):
+def clean_and_add(href, extracted_links):
+  if not href:
+    return
+  # Unwrap DuckDuckGo redirects
+  if "uddg=" in href:
+    parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
+    href = parsed.get("uddg", [""])
+  # Unwrap Yahoo redirects (RU=...)
+  elif "/RU=" in href:
+    try:
+      encoded_part = href.split("/RU=").split("/RK=")
+      href = urllib.parse.unquote(encoded_part)
+    except Exception:
+      pass
+
+  if href.startswith("http") and not any(
+      bad in href
+      for bad in ["duckduckgo.com", "bing.com", "yahoo.com", "microsoft.com"]
+  ):
+    extracted_links.add(href)
+
+
+def fetch_all_engines(queries):
   extracted_links = set()
 
   with sync_playwright() as p:
@@ -26,25 +48,43 @@ def fetch_google_links(queries):
     page = context.new_page()
 
     for query in queries:
-      params = urllib.parse.urlencode({"q": query, "tbs": "qdr:d", "num": "20"})
-      url = "https://google.com" + "/search?" + params
+      # 1. DuckDuckGo (df=d -> Past 24 hours)
+      try:
+        ddg_params = urllib.parse.urlencode({"q": query, "df": "d"})
+        ddg_url = "https://duckduckgo.com" + "/html/?" + ddg_params
+        page.goto(ddg_url, wait_until="domcontentloaded", timeout=15000)
+        time.sleep(2)
+        for link in page.locator("a.result__url").all():
+          clean_and_add(link.get_attribute("href"), extracted_links)
+      except Exception as e:
+        print(f"DuckDuckGo skipped for '{query}': {e}")
 
-      page.goto(url, wait_until="domcontentloaded")
-      time.sleep(4)
+      # 2. Bing (filters=ex1:"ez1" -> Past 24 hours)
+      try:
+        bing_params = urllib.parse.urlencode(
+            {"q": query, "filters": 'ex1:"ez1"'}
+        )
+        bing_url = "https://bing.com" + "/search?" + bing_params
+        page.goto(bing_url, wait_until="domcontentloaded", timeout=15000)
+        time.sleep(2)
+        for link in page.locator("li.b_algo h2 a").all():
+          clean_and_add(link.get_attribute("href"), extracted_links)
+      except Exception as e:
+        print(f"Bing skipped for '{query}': {e}")
 
-      links = page.locator("div#search a").all()
-      for link in links:
-        href = link.get_attribute("href")
-        if (
-            href
-            and href.startswith("http")
-            and "google.com" not in href
-            and "webcache" not in href
-        ):
-          extracted_links.add(href)
+      # 3. Yahoo Search (btf=d -> Past 24 hours)
+      try:
+        yahoo_params = urllib.parse.urlencode({"p": query, "btf": "d"})
+        yahoo_url = "https://yahoo.com" + "/search?" + yahoo_params
+        page.goto(yahoo_url, wait_until="domcontentloaded", timeout=15000)
+        time.sleep(2)
+        for link in page.locator("div#web ol li h3 a").all():
+          clean_and_add(link.get_attribute("href"), extracted_links)
+      except Exception as e:
+        print(f"Yahoo skipped for '{query}': {e}")
 
     browser.close()
-  return list(extracted_links)
+  return sorted(list(extracted_links))
 
 
 def save_to_pdf(links):
@@ -53,7 +93,13 @@ def save_to_pdf(links):
   today = datetime.now().strftime("%Y-%m-%d")
 
   pdf.set_font("Arial", "B", 14)
-  pdf.cell(0, 10, f"Fresher Job Links (Last 24 Hrs) - {today}", ln=True, align="C")
+  pdf.cell(
+      0,
+      10,
+      f"Fresher Job Links (DDG + Bing + Yahoo | Last 24 Hrs) - {today}",
+      ln=True,
+      align="C",
+  )
   pdf.ln(5)
 
   pdf.set_font("Arial", size=9)
@@ -61,7 +107,7 @@ def save_to_pdf(links):
     pdf.cell(
         0,
         10,
-        "No links found (Google may have shown a CAPTCHA or 0 jobs matched).",
+        "No new fresher job links matched across DuckDuckGo, Bing, or Yahoo.",
         ln=True,
     )
   else:
@@ -72,9 +118,9 @@ def save_to_pdf(links):
 
   filename = f"fresher_links_{today}.pdf"
   pdf.output(filename)
-  print(f"Saved {filename} with {len(links)} links.")
+  print(f"Saved {filename} with {len(links)} unique links.")
 
 
 if __name__ == "__main__":
-  job_links = fetch_google_links(QUERIES)
+  job_links = fetch_all_engines(QUERIES)
   save_to_pdf(job_links)
