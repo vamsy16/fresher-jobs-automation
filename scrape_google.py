@@ -6,19 +6,10 @@ from fpdf import FPDF
 from playwright.sync_api import sync_playwright
 
 QUERIES = [
-    'site:://linkedin.com "fresher"',
-    'site:naukri.com "fresher" jobs',
-    'site:internshala.com "fresher"',
-    '"fresher" jobs bengaluru apply',
-]
-
-TARGET_DOMAINS = [
-    "linkedin.com",
-    "naukri.com",
-    "internshala.com",
-    "foundit.in",
-    "indeed.com",
-    "wellfound.com",
+    '"fresher" jobs apply online',
+    '"fresher" hiring 2026 apply',
+    '"0-1 years" experience jobs bengaluru',
+    '"graduate engineer trainee" hiring apply',
 ]
 
 
@@ -41,31 +32,32 @@ def fetch_google_links(queries):
       page.goto(url, wait_until="networkidle")
       time.sleep(3)
 
-      # If Google asks for CAPTCHA, wait 25 seconds for you to click it
       if (
           "sorry" in page.url
           or page.locator("iframe[src*='recaptcha']").count() > 0
       ):
-        print("CAPTCHA shown! Please click 'I am not a robot' in Chrome...")
+        print("CAPTCHA shown! Please solve it in the Chrome window...")
         time.sleep(25)
 
       all_a = page.locator("a").all()
-      print(f"Query: {query} | Total <a> tags on page: {len(all_a)}")
+      print(f"Query: {query} | Links scanned: {len(all_a)}")
 
       for link in all_a:
-        href = link.get_attribute("href")
+        href = link.get_attribute("href") or link.get_attribute("data-href")
         if not href:
           continue
+
         if href.startswith("/url?"):
           parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
-          q_list = parsed.get("q", [])
+          q_list = parsed.get("q") or parsed.get("url") or []
           href = q_list.pop(0) if q_list else ""
 
         if (
             isinstance(href, str)
             and href.startswith("http")
             and "google." not in href
-            and any(domain in href for domain in TARGET_DOMAINS)
+            and "gstatic." not in href
+            and "youtube.com" not in href
         ):
           extracted_links.add(href)
 
