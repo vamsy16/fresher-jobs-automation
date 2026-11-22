@@ -1,52 +1,47 @@
 from datetime import datetime
+import subprocess
 import time
 import urllib.parse
-from bs4 import BeautifulSoup
 from fpdf import FPDF
-import requests
+from playwright.sync_api import sync_playwright
 
-# LinkedIn public guest search queries (f_TPR=r86400 strictly filters to last 24 hours)
-SEARCH_TERMS = [
-    ("fresher", "India"),
-    ("entry level", "India"),
-    ("graduate trainee", "India"),
+# Google Search queries (filtered to past 24 hours via tbs=qdr:d)
+QUERIES = [
+    'site:://linkedin.com "fresher" OR "0-1 years"',
+    'site:://naukri.com "fresher"',
+    'site:://internshala.com "fresher"',
+    'site:foundit.in/job "fresher"',
 ]
 
 
-def fetch_linkedin_24h_links():
+def fetch_google_links(queries):
   extracted_links = set()
-  headers = {
-      "User-Agent": (
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-          " (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-      )
-  }
 
-  for keywords, location in SEARCH_TERMS:
-    params = urllib.parse.urlencode({
-        "keywords": keywords,
-        "location": location,
-        "f_TPR": "r86400",  # 86400 seconds = Posted in last 24 hours
-        "start": "0",
-    })
-    url = (
-        "https://linkedin.com?"
-        + params
-    )
-    try:
-      resp = requests.get(url, headers=headers, timeout=15)
-      if resp.status_code == 200:
-        soup = BeautifulSoup(resp.text, "html.parser")
-        for a_tag in soup.find_all("a", href=True):
-          href = a_tag["href"]
-          if "/jobs/view/" in href:
-            # Strip tracking parameters so URLs are clean
-            clean_url = href.split("?")
-            extracted_links.add(clean_url)
-      time.sleep(2)
-    except Exception as e:
-      print(f"Error fetching {keywords}: {e}")
+  with sync_playwright() as p:
+    # Visible Chrome window prevents Google CAPTCHAs on your home/mobile internet
+    browser = p.chromium.launch(headless=False)
+    context = browser.new_context()
+    page = context.new_page()
 
+    for query in queries:
+      params = urllib.parse.urlencode({"q": query, "tbs": "qdr:d", "num": "20"})
+      url = "https://google.com" + "/search?" + params
+
+      page.goto(url, wait_until="domcontentloaded")
+      time.sleep(5)
+
+      links = page.locator("div#search a").all()
+      for link in links:
+        href = link.get_attribute("href")
+        if (
+            href
+            and href.startswith("http")
+            and "google.com" not in href
+            and "webcache" not in href
+        ):
+          extracted_links.add(href)
+
+    browser.close()
   return sorted(list(extracted_links))
 
 
@@ -56,12 +51,18 @@ def save_to_pdf(links):
   today = datetime.now().strftime("%Y-%m-%d")
 
   pdf.set_font("Arial", "B", 14)
-  pdf.cell(0, 10, f"Fresher Job Links (Last 24 Hrs) - {today}", ln=True, align="C")
+  pdf.cell(
+      0,
+      10,
+      f"Google Fresher Job Links (Last 24 Hrs) - {today}",
+      ln=True,
+      align="C",
+  )
   pdf.ln(5)
 
   pdf.set_font("Arial", size=9)
   if not links:
-    pdf.cell(0, 10, "No fresher job links found in the last 24 hours.", ln=True)
+    pdf.cell(0, 10, "No links extracted in this run.", ln=True)
   else:
     for idx, link in enumerate(links, 1):
       pdf.set_text_color(0, 0, 255)
@@ -70,9 +71,21 @@ def save_to_pdf(links):
 
   filename = f"fresher_links_{today}.pdf"
   pdf.output(filename)
-  print(f"Saved {filename} with {len(links)} unique links.")
+  print(f"Saved {filename} with {len(links)} links.")
+  return filename
+
+
+def push_to_github(filename):
+  subprocess.run(["git", "add", "scrape_google.py", filename], check=True)
+  subprocess.run(
+      ["git", "commit", "-m", f"Add Google fresher job links: {filename}"],
+      check=False,
+  )
+  subprocess.run(["git", "push"], check=True)
+  print("Successfully uploaded PDF to GitHub!")
 
 
 if __name__ == "__main__":
-  job_links = fetch_linkedin_24h_links()
-  save_to_pdf(job_links)
+  job_links = fetch_google_links(QUERIES)
+  pdf_file = save_to_pdf(job_links)
+  push_to_github(pdf_file)
