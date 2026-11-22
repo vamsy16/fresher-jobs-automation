@@ -4,7 +4,6 @@ import urllib.parse
 from fpdf import FPDF
 from playwright.sync_api import sync_playwright
 
-# Edit these queries anytime to match your specific skills or city (e.g., Bengaluru)
 QUERIES = [
     'site:://linkedin.com "fresher" OR "0-1 years"',
     'site:://naukri.com "fresher"',
@@ -28,11 +27,10 @@ def fetch_google_links(queries):
 
     for query in queries:
       encoded_query = urllib.parse.quote(query)
-      # tbs=qdr:d filters results to the last 24 hours
       url = f"https://google.com{encoded_query}&tbs=qdr:d&num=20"
 
       page.goto(url, wait_until="domcontentloaded")
-      time.sleep(4)  # Pause to let page load and reduce rate-limiting
+      time.sleep(4)
 
       links = page.locator("div#search a").all()
       for link in links:
