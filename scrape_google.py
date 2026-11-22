@@ -6,20 +6,26 @@ from fpdf import FPDF
 from playwright.sync_api import sync_playwright
 
 QUERIES = [
-    'site:://linkedin.com "fresher" OR "0-1 years"',
+    'site:://linkedin.com "fresher"',
     'site:naukri.com "fresher" jobs',
-    'site:internshala.com "fresher" job',
-    'site:foundit.in "fresher" job',
+    'site:internshala.com "fresher"',
+    '"fresher" jobs bengaluru apply',
 ]
 
-TARGET_DOMAINS = ["linkedin.com", "naukri.com", "internshala.com", "foundit.in"]
+TARGET_DOMAINS = [
+    "linkedin.com",
+    "naukri.com",
+    "internshala.com",
+    "foundit.in",
+    "indeed.com",
+    "wellfound.com",
+]
 
 
 def fetch_google_links(queries):
   extracted_links = set()
 
   with sync_playwright() as p:
-    # Uses your real Chrome browser with automation flag hidden
     browser = p.chromium.launch(
         channel="chrome",
         headless=False,
@@ -32,28 +38,33 @@ def fetch_google_links(queries):
       params = urllib.parse.urlencode({"q": query, "tbs": "qdr:d", "num": "20"})
       url = "https://google.com" + "/search?" + params
 
-      page.goto(url, wait_until="domcontentloaded")
-      time.sleep(4)
+      page.goto(url, wait_until="networkidle")
+      time.sleep(3)
 
-      # If Google shows a CAPTCHA/sorry page, give you 20 seconds to solve it
-      if "sorry/index" in page.url or page.locator("iframe[src*='recaptcha']").count() > 0:
-        print("CAPTCHA detected! Please solve it in the browser window...")
-        time.sleep(20)
+      # If Google asks for CAPTCHA, wait 25 seconds for you to click it
+      if (
+          "sorry" in page.url
+          or page.locator("iframe[src*='recaptcha']").count() > 0
+      ):
+        print("CAPTCHA shown! Please click 'I am not a robot' in Chrome...")
+        time.sleep(25)
 
-      # Extract all external links matching our job portals
-      for link in page.locator("a").all():
+      all_a = page.locator("a").all()
+      print(f"Query: {query} | Total <a> tags on page: {len(all_a)}")
+
+      for link in all_a:
         href = link.get_attribute("href")
         if not href:
           continue
-        # Handle Google /url?q=... redirect links if present
         if href.startswith("/url?"):
           parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
-          q_urls = parsed.get("q", [])
-          href = q_urls if q_urls else ""
+          q_list = parsed.get("q", [])
+          href = q_list.pop(0) if q_list else ""
 
         if (
-            href.startswith("http")
-            and "google.com" not in href
+            isinstance(href, str)
+            and href.startswith("http")
+            and "google." not in href
             and any(domain in href for domain in TARGET_DOMAINS)
         ):
           extracted_links.add(href)
