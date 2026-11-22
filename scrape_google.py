@@ -26,8 +26,8 @@ def fetch_google_links(queries):
     page = context.new_page()
 
     for query in queries:
-      encoded_query = urllib.parse.quote(query)
-      url = f"https://google.com{encoded_query}&tbs=qdr:d&num=20"
+      params = urllib.parse.urlencode({"q": query, "tbs": "qdr:d", "num": "20"})
+      url = "https://google.com" + "/search?" + params
 
       page.goto(url, wait_until="domcontentloaded")
       time.sleep(4)
